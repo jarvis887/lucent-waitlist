@@ -6,6 +6,7 @@
   <title>Lucent AI — Secure Your Spot in the Future of AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -680,10 +681,16 @@
 
     <div class="section section-card">
       <div class="card">
-        <form class="input-row" onsubmit="handleSubmit(event)">
+        <form class="input-row" onsubmit="handleSubmit(event)" style="position:relative">
           <input type="email" placeholder="Your Email" required>
+          <!-- Honeypot -->
+          <div style="position:absolute;left:-9999px" aria-hidden="true">
+            <input type="text" name="website" tabindex="-1" autocomplete="off">
+          </div>
           <button type="submit" class="btn-join">Join Waitlist</button>
         </form>
+        <!-- Turnstile — replace SITE_KEY with your key from dash.cloudflare.com -->
+        <div class="cf-turnstile" data-sitekey="0x4AAAAAAChJMO7lx8PODI5t" data-callback="onTurnstileSuccess" data-theme="dark" data-size="compact"></div>
         <div class="social-proof">
           <div class="avatars">
             <div class="avatar av1"></div>
@@ -1015,23 +1022,51 @@
   }
   drawGlobe();
 
+  // Bot protection
+  var PAGE_LOAD_TIME = Date.now();
+  var turnstileToken = null;
+  function onTurnstileSuccess(token) { turnstileToken = token; }
+
   // Form
   function handleSubmit(e) {
     e.preventDefault();
-    const input = e.target.querySelector('input');
-    const btn = e.target.querySelector('button');
-    const email = input.value.trim();
+    var form = e.target;
+    var input = form.querySelector('input[type="email"]');
+    var honeypot = form.querySelector('input[name="website"]');
+    var btn = form.querySelector('button');
+    var email = input.value.trim();
     if (!email) return;
+
+    // Client-side checks
+    if (honeypot && honeypot.value) return;
+    if (Date.now() - PAGE_LOAD_TIME < 3000) {
+      btn.textContent = 'Too fast — try again';
+      setTimeout(function() { btn.textContent = 'Join Waitlist'; }, 2000);
+      return;
+    }
+    if (!turnstileToken) {
+      btn.textContent = 'Verifying...';
+      setTimeout(function() { btn.textContent = 'Join Waitlist'; }, 2000);
+      return;
+    }
 
     btn.disabled = true;
     btn.textContent = 'Joining...';
     btn.style.opacity = '0.7';
 
-    fetch('https://script.google.com/macros/s/AKfycbzoX0IYn4SX_sGGAsHi5l48HNvwLZReFsoqVW2itEfB4ulRRoD5SL5qRYycWJb9Y5G7/exec', {
+    fetch('/api/submit', {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ email: email, source: 'mylucentai.com' })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email,
+        token: turnstileToken,
+        website: honeypot ? honeypot.value : '',
+        timestamp: PAGE_LOAD_TIME
+      })
+    })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Failed');
+      return r.json();
     })
     .then(function() {
       btn.textContent = 'You\'re In!';
@@ -1046,6 +1081,9 @@
     .finally(function() {
       btn.disabled = false;
       btn.style.opacity = '';
+      // Reset Turnstile for next submission
+      turnstileToken = null;
+      if (window.turnstile) turnstile.reset();
       setTimeout(function() { btn.textContent = 'Join Waitlist'; btn.style.background = ''; btn.style.color = ''; }, 3000);
     });
   }
